@@ -379,6 +379,43 @@ function buildPrint(){
  <h2>By domain</h2><table><tr><th>Domain</th><th>Amount</th><th>Share</th></tr>${doms.map(([d,v])=>`<tr><td>${esc(d)}</td><td>${inr(v)}</td><td>${(v/st.spent*100).toFixed(1)}%</td></tr>`).join('')}</table>
  <h2>Date by date</h2><table><tr><th>Date</th><th>Day</th><th>Expenses</th><th>Total</th></tr>${rows}</table>`;
 }
+function pdfSafe(s){return String(s).replace(/₹/g,'Rs.').replace(/[–—]/g,'-').replace(/[^\x20-\x7E]/g,'').replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)')}
+function wrapTxt(s,max){const w=String(s).split(' '),L=[];let c='';w.forEach(x=>{if((c+' '+x).trim().length>max&&c){L.push(c);c=x}else c=(c+' '+x).trim()});if(c)L.push(c);return L.length?L:['']}
+function makePdf(st){
+ const P=[];let ops='',y=800;
+ const np=()=>{P.push(ops);ops='';y=800};
+ const ln=h=>{if(y-h<45)np();y-=h};
+ const T=(s,x,sz,b)=>{ops+='BT /F'+(b?2:1)+' '+sz+' Tf '+x+' '+y+' Td ('+pdfSafe(s)+') Tj ET\n'};
+ const R=(s,xr,sz,b)=>{const t=pdfSafe(s).replace(/\\/g,'');T(s,Math.max(40,xr-t.length*sz*0.53),sz,b)};
+ ln(22);T('Expense Statement - '+MN[st.m-1]+' '+st.y,40,18,1);
+ ln(14);T('Generated '+new Date().toLocaleDateString('en-IN'),40,9);
+ ln(26);T('Summary',40,12,1);
+ [['Starting pool',inr(st.pool)],['Total spent',inr(st.spent)],['Remaining',inr(st.rem)],['Active / no-spend days',st.active+' / '+(st.D-st.active)]].forEach(r=>{ln(15);T(r[0],40,10);T(r[1],220,10,1)});
+ ln(26);T('By domain',40,12,1);
+ Object.entries(st.dom).sort((a,b)=>b[1]-a[1]).forEach(([d,v])=>{ln(15);T(d,40,10);R(inr(v),380,10);R((v/Math.max(st.spent,1)*100).toFixed(1)+'%',470,10)});
+ ln(26);T('Date by date',40,12,1);
+ ln(16);T('Date',40,9,1);T('Day',90,9,1);T('Expenses',130,9,1);R('Total',555,9,1);
+ for(let d=1;d<=st.D;d++){
+  const k=S.active+'-'+pad(d),its=st.by[k]||[],dt=new Date(st.y,st.m-1,d);
+  const txt=its.length?its.map(i=>i.name+' ('+inr(i.amt)+')').join(', '):'No spend';
+  const L=wrapTxt(pdfSafe(txt).replace(/\\\(/g,'(').replace(/\\\)/g,')'),72);
+  L.forEach((l,j)=>{ln(j?11:15);if(j===0){T(d+' '+MN[st.m-1].slice(0,3),40,9);T(WD[dt.getDay()],90,9);if(its.length)R(inr(st.dayTot(k)),555,9,1)}T(l,130,9)});
+ }
+ np();
+ let out='%PDF-1.4\n';const offs=[],n=P.length,kids=[];
+ const obj=(i,b)=>{offs[i]=out.length;out+=i+' 0 obj\n'+b+'\nendobj\n'};
+ for(let i=0;i<n;i++)kids.push((5+i*2)+' 0 R');
+ obj(1,'<< /Type /Catalog /Pages 2 0 R >>');
+ obj(2,'<< /Type /Pages /Kids ['+kids.join(' ')+'] /Count '+n+' >>');
+ obj(3,'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+ obj(4,'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
+ P.forEach((c,i)=>{obj(5+i*2,'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents '+(6+i*2)+' 0 R >>');obj(6+i*2,'<< /Length '+c.length+' >>\nstream\n'+c+'endstream')});
+ const xr=out.length,N=5+n*2;
+ out+='xref\n0 '+N+'\n0000000000 65535 f \n';for(let i=1;i<N;i++)out+=String(offs[i]).padStart(10,'0')+' 00000 n \n';
+ out+='trailer\n<< /Size '+N+' /Root 1 0 R >>\nstartxref\n'+xr+'\n%%EOF';
+ const u=new Uint8Array(out.length);for(let i=0;i<out.length;i++)u[i]=out.charCodeAt(i)&255;
+ return new Blob([u],{type:'application/pdf'});
+}
 function dl(name,txt,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500)}
 function nav(dir){const ks=Object.keys(S.months).sort(),i=ks.indexOf(S.active)+dir;if(i>=0&&i<ks.length){S.active=ks[i];sel=null;selDom=null;q='';save();render()}}
 let dip=null;
@@ -392,7 +429,7 @@ document.addEventListener('click',e=>{
   case'close':closeModal();break;
   case'theme':{const n=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=n;store.set(TKEY,n);break}
   case'refresh':load();render();toast('Refreshed '+new Date().toLocaleTimeString('en-IN'));break;
-  case'pdf':buildPrint();window.print();break;
+  case'pdf':{try{dl('Expense_'+MN[st.m-1]+'_'+st.y+'.pdf',makePdf(st),'application/pdf');toast('PDF downloaded')}catch(x){buildPrint();window.print()}break}
   case'install':if(dip){dip.prompt();dip=null;t.style.display='none'}else toast('Chrome menu ⋮ → Add to Home screen');break;
   case'go':{const el=document.getElementById(t.dataset.t);if(el)el.scrollIntoView({behavior:'smooth',block:'start'});break}
   case'add':expForm(null,t.dataset.d);break;
