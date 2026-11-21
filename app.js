@@ -91,7 +91,10 @@ const SEED=`- 12000 + 500 mummy
 50 rapido
 10 bus ticket
 20/11
-300 cng`;
+311 cng
+21/11
+10 bus ticket
+250 bla bla`;
 function seed(){const p=parseNote(SEED,'2026-11');return{active:'2026-11',months:{'2026-11':{pool:p.pool,items:p.items}}}}
 let S,custom=[],sel=null,selDom=null,q='',filt='all',lastDel=null,toastT;
 function norm(){if(!Array.isArray(S.recurring))S.recurring=[]}
