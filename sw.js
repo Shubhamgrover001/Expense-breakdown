@@ -1,4 +1,4 @@
-const CACHE = "expense-breakdown-v3";
+const CACHE = "expense-breakdown-v4";
 const ASSETS = ["./", "./index.html", "./manifest.json", "./styles.css", "./app.js", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (e) => {

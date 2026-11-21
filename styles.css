@@ -101,3 +101,6 @@ button:active,.cd:active{transform:scale(.97)}
 .qa .hint{font-size:.72rem;color:var(--mut);margin-top:6px}
 .chip.fq b{font-weight:600;margin-left:4px;color:var(--warn)}
 .k .s .warn{color:var(--bad);font-weight:700}
+
+.bud{margin:8px 0}.bh{display:flex;justify-content:space-between;gap:8px;font-size:.82rem;margin-bottom:4px}
+.bt{height:8px;background:var(--card2);border-radius:6px;overflow:hidden}.bt i{display:block;height:100%;border-radius:6px;transition:width .3s}

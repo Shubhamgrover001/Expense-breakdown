@@ -94,10 +94,12 @@ const SEED=`- 12000 + 500 mummy
 300 cng`;
 function seed(){const p=parseNote(SEED,'2026-11');return{active:'2026-11',months:{'2026-11':{pool:p.pool,items:p.items}}}}
 let S,custom=[],sel=null,selDom=null,q='',filt='all',lastDel=null,toastT;
+function norm(){if(!Array.isArray(S.recurring))S.recurring=[]}
 function load(){
  try{S=JSON.parse(store.get(KEY))}catch(e){S=null}
  if(!S||!S.months||!Object.keys(S.months).length)S=seed();
  if(!S.months[S.active])S.active=Object.keys(S.months).sort()[0];
+ norm();
  try{custom=JSON.parse(store.get(DKEY)||'[]')}catch(e){custom=[]}
  if(!Array.isArray(custom))custom=[];
 }
@@ -180,6 +182,39 @@ function ddHTML(st){
 }
 function qDate(st){return sel||(st.cur?S.active+'-'+pad(st.today):null)}
 function freqItems(){const m={};M().items.slice().sort((a,b)=>a.date<b.date?-1:1).forEach(i=>{const k=nameKey(i.name),o=m[k]||(m[k]={c:0});o.c++;o.amt=i.amt;o.name=i.name.split(' – ')[0]});return Object.values(m).sort((a,b)=>b.c-a.c).slice(0,6)}
+function weekStats(st){
+ const end=st.cur?st.today:st.D,ym=S.active;
+ const sum=(a,b)=>{let t=0;const dm={};for(let x=Math.max(1,a);x<=b;x++)(st.by[ym+'-'+pad(x)]||[]).forEach(i=>{t+=i.amt;dm[i.domain]=(dm[i.domain]||0)+i.amt});return{t,dm}};
+ const w=sum(end-6,end),p=sum(end-13,end-7),top=Object.entries(w.dm).sort((a,b)=>b[1]-a[1])[0];
+ return{end,first:Math.max(1,end-6),w:w.t,p:p.t,top,avg:w.t/Math.max(1,Math.min(7,end))}
+}
+function weekHTML(st){
+ const k=weekStats(st),dl=k.p>0?((k.w-k.p)/k.p*100):null,mn=MN[st.m-1].slice(0,3);
+ return`<div class="big num">${inr(k.w)}</div><div style="color:var(--mut);font-size:.8rem">${k.first}–${k.end} ${mn} · avg ${inr(k.avg)}/day</div>
+ <div style="margin-top:8px;font-size:.85rem">${dl===null?'<span style="color:var(--mut)">No previous 7 days to compare</span>':`<b class="${dl>0?'bad':'ok'}">${dl>0?'▲':'▼'} ${Math.abs(dl).toFixed(0)}%</b> <span style="color:var(--mut)">vs previous 7 days (${inr(k.p)})</span>`}</div>
+ <div style="margin-top:6px;font-size:.85rem">${k.top?'Top: <b>'+esc(k.top[0])+'</b> <span class="num">'+inr(k.top[1])+'</span>':'<span style="color:var(--mut)">No spend in this window</span>'}</div>`
+}
+function budgetsHTML(st){
+ const B=M().budgets||{},ds=Object.keys(B).filter(x=>B[x]>0);
+ if(!ds.length)return'<p style="color:var(--mut);margin:0 0 8px;font-size:.85rem">No budgets yet. Set a monthly limit per domain to get warnings before you overspend.</p>';
+ return ds.sort((a,b)=>(st.dom[b]||0)/B[b]-(st.dom[a]||0)/B[a]).map(x=>{const sp=st.dom[x]||0,pc=sp/B[x]*100,c=pc>=100?'var(--bad)':pc>=80?'var(--warn)':'var(--ok)';
+  return`<div class="bud"><div class="bh"><span>${esc(x)}</span><span class="num">${inr(sp)} / ${inr(B[x])}${pc>=100?' · over by '+inr(sp-B[x]):pc>=80?' · '+Math.round(pc)+'%':''}</span></div><div class="bt"><i style="width:${Math.min(100,pc)}%;background:${c}"></i></div></div>`}).join('')
+}
+function budModal(){
+ const B=M().budgets||{};
+ modal(`<h2>Budgets · ${MN[stats().m-1]}</h2><p style="color:var(--mut);font-size:.8rem;margin:4px 0">Monthly limit per domain. Leave blank for no limit. New months copy these.</p><form id="fbud">${allDomains().map(x=>`<label>${esc(x)} (₹)</label><input type="number" min="0" inputmode="numeric" data-d="${esc(x)}" value="${B[x]||''}">`).join('')}<div class="row"><button type="button" class="btn g" data-a="close">Cancel</button><button class="btn">Save</button></div></form>`)
+}
+function recurModal(){
+ const L=S.recurring.map(r=>`<div class="item"><span class="dot" style="background:${dcolor(r.domain)}"></span><div class="t"><b>${esc(r.name)}</b><span>${esc(r.domain)} · day ${r.day}</span></div><b class="num">${inr(r.amt)}</b><button class="sm" data-a="rec-del" data-id="${r.id}">Del</button></div>`).join('')||'<p style="color:var(--mut);margin:4px 0;font-size:.85rem">None yet. Add things that repeat monthly (recharge, gym, subscriptions).</p>';
+ modal(`<h2>Recurring expenses</h2>${L}<form id="frec"><label>Item</label><input name="name" required maxlength="60"><label>Amount (₹)</label><input type="number" name="amt" required min="1" inputmode="numeric"><label>Day of month (1-28)</label><input type="number" name="day" min="1" max="28" value="1" inputmode="numeric"><label>Domain</label><select name="domain">${allDomains().map(x=>`<option>${esc(x)}</option>`).join('')}</select><div class="row"><button type="button" class="btn g" data-a="close">Close</button><button class="btn">+ Add</button></div></form><div class="row"><button class="btn g" data-a="rec-apply">Apply to ${MN[stats().m-1]}</button></div>`)
+}
+function applyRecurring(){
+ const st=stats();if(!st.cur&&new Date(st.y,st.m-1,1)>new Date())return 0;
+ const have=new Set(M().items.map(i=>i.date+'|'+i.amt+'|'+i.name.toLowerCase()));let n=0;
+ S.recurring.forEach(r=>{const day=Math.min(r.day,st.D);if(st.cur&&day>st.today)return;const k=S.active+'-'+pad(day),key=k+'|'+r.amt+'|'+r.name.toLowerCase();
+  if(have.has(key))return;have.add(key);M().items.push({id:uid(),date:k,amt:r.amt,name:r.name,domain:r.domain});n++});
+ return n
+}
 function render(){
  const st=stats();
  $('#mlabel').textContent=MN[st.m-1].slice(0,3)+' '+st.y;
@@ -200,6 +235,10 @@ function render(){
  <div class="grid two" id="sec-ch">
   <div class="card"><h3>Domain split</h3>${donut(st)}</div>
   <div class="card"><h3>Day by day</h3>${bars(st)}</div>
+ </div>
+ <div class="grid two" id="sec-wk">
+  <div class="card"><h3>Last 7 days</h3>${weekHTML(st)}</div>
+  <div class="card"><h3>Budgets <button class="sm" data-a="budgets" style="float:right;text-transform:none;letter-spacing:0">Set budgets</button></h3>${budgetsHTML(st)}</div>
  </div>
  <div class="grid two" id="sec-cal">
   <div class="card"><h3>Calendar · ${MN[st.m-1]} ${st.y}</h3>${calendar(st)}</div>
@@ -325,6 +364,10 @@ document.addEventListener('click',e=>{
   case'qfill':{const i=$('#qa');if(i){i.value=t.dataset.v;i.focus()}break}
   case'copy-note':{const tx=noteText();(navigator.clipboard?navigator.clipboard.writeText(tx):Promise.reject()).then(()=>toast('Note copied')).catch(()=>{const ta=$('#ta');ta.value=tx;ta.select();toast('Select and copy the text')});break}
   case'exp-csv':{const q=v=>{v=String(v);if(/^[=+\-@]/.test(v))v="'"+v;return'"'+v.replace(/"/g,'""')+'"'};const rows=['Date,Amount,Item,Domain',...M().items.slice().sort((a,b)=>a.date<b.date?-1:1).map(i=>[i.date,i.amt,q(i.name),q(i.domain)].join(','))];dl('Expense_'+S.active+'.csv','﻿'+rows.join('\n'),'text/csv');break}
+  case'budgets':budModal();break;
+  case'recur':recurModal();break;
+  case'rec-del':S.recurring=S.recurring.filter(r=>r.id!==t.dataset.id);save();recurModal();break;
+  case'rec-apply':{const n=applyRecurring();save();closeModal();render();toast(n?'Added '+n+' recurring':'Nothing new to add');break}
   case'exp-json':dl('expense-backup.json',JSON.stringify({S,custom}),'application/json');break;
  }
 });
@@ -337,7 +380,7 @@ document.addEventListener('input',e=>{
 });
 document.addEventListener('change',e=>{
  if(e.target.id==='dsel'){$('#cdom').style.display=e.target.value==='__c'?'':'none'}
- if(e.target.id==='jf'&&e.target.files[0]){const r=new FileReader();r.onload=()=>{try{const o=JSON.parse(r.result);if(!o.S||!o.S.months)throw 0;S=o.S;custom=o.custom||[];save();closeModal();render();toast('Backup restored')}catch(x){toast('Invalid backup file')}};r.readAsText(e.target.files[0])}
+ if(e.target.id==='jf'&&e.target.files[0]){const r=new FileReader();r.onload=()=>{try{const o=JSON.parse(r.result);if(!o.S||!o.S.months)throw 0;S=o.S;norm();custom=o.custom||[];save();closeModal();render();toast('Backup restored')}catch(x){toast('Invalid backup file')}};r.readAsText(e.target.files[0])}
 });
 document.addEventListener('submit',e=>{
  e.preventDefault();const f=e.target,d=new FormData(f);
@@ -349,6 +392,8 @@ document.addEventListener('submit',e=>{
   M().items.push({id:uid(),date:dt,amt:+m[1],name:name,domain:prev?prev.domain:guess(name)});
   save();render();toast('Added '+inr(+m[1])+' · '+name);const qi=$('#qa');if(qi)qi.focus();return;
  }
+ if(f.id==='fbud'){const B={};f.querySelectorAll('input[data-d]').forEach(i=>{const v=Math.round(+i.value);if(v>0)B[i.dataset.d]=v});M().budgets=B;save();closeModal();render();toast('Budgets saved');return}
+ if(f.id==='frec'){const nm=clean(d.get('name')||''),amt=Math.round(+d.get('amt')),day=Math.min(28,Math.max(1,Math.round(+d.get('day'))||1));if(!nm||!(amt>0))return;S.recurring.push({id:uid(),name:nm,amt:amt,day:day,domain:d.get('domain')});save();recurModal();return}
  if(f.id==='fexp'){
   let dom=d.get('domain');if(dom==='__c'){dom=clean(d.get('cdom')||'')||'Other';if(!allDomains().some(x=>x.toLowerCase()===dom.toLowerCase())){custom.push(dom)}else dom=allDomains().find(x=>x.toLowerCase()===dom.toLowerCase())}
   const rec={date:d.get('date'),amt:Math.max(1,Math.round(+d.get('amt'))),name:clean(d.get('name'))||'Expense',domain:dom};
@@ -359,7 +404,7 @@ document.addEventListener('submit',e=>{
  }
  if(f.id==='fmon'){
   const ym=d.get('ym');if(!/^\d{4}-\d{2}$/.test(ym))return;
-  if(!S.months[ym])S.months[ym]={pool:Math.max(0,Math.round(+d.get('pool')||0)),items:[]};
+  if(!S.months[ym])S.months[ym]={pool:Math.max(0,Math.round(+d.get('pool')||0)),items:[],budgets:Object.assign({},M().budgets||{})};
   S.active=ym;sel=null;selDom=null;q='';save();closeModal();render();
  }
 });
